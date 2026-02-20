@@ -7,6 +7,14 @@ authors = ["Clément Tourrière <clement.tourriere@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/keylty/pgbranch"
 
+[features]
+default = ["backend-local", "backend-postgres-template", "backend-neon", "backend-dblab", "backend-xata"]
+backend-local = ["dep:bollard", "dep:rusqlite", "dep:rust-s3", "dep:tar", "dep:bytes", "dep:futures-util", "dep:tempfile", "dep:uuid", "dep:url"]
+backend-postgres-template = ["dep:tokio-postgres"]
+backend-neon = ["dep:reqwest"]
+backend-dblab = ["dep:reqwest"]
+backend-xata = ["dep:reqwest"]
+
 [dependencies]
 # CLI and argument parsing
 clap = { version = "4.5", default-features = false, features = ["derive", "std", "help", "usage", "error-context"] }
@@ -17,10 +25,10 @@ serde_yaml_ng = { version = "0.10", default-features = false }
 serde_json = "1.0"
 
 # Async runtime
-tokio = { version = "1.46", default-features = false, features = ["rt", "rt-multi-thread", "net", "time", "macros", "process", "fs", "signal"] }
+tokio = { version = "1.46", default-features = false, features = ["rt", "rt-multi-thread", "net", "time", "macros", "process", "fs"] }
 
 # Database (for postgres_template backend)
-tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"], optional = true }
 
 # Error handling
 anyhow = "1.0"
@@ -51,34 +59,34 @@ inquire = { version = "0.9", default-features = false, features = ["crossterm"] 
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 
 # SQLite for local backend state
-rusqlite = { version = "0.38", features = ["bundled"] }
+rusqlite = { version = "0.38", default-features = false, features = ["bundled"], optional = true }
 
 # UUID generation
-uuid = { version = "1.15", features = ["v4", "serde"] }
+uuid = { version = "1.15", features = ["v4", "serde"], optional = true }
 
 # HTTP client for cloud backends
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
 
 # URL parsing
-url = "2.5"
+url = { version = "2.5", optional = true }
 
 # S3 support for data seeding
-rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"] }
+rust-s3 = { version = "0.37", default-features = false, features = ["tokio-rustls-tls"], optional = true }
 
 # Temp files
-tempfile = "3.20"
+tempfile = { version = "3.20", optional = true }
 
 # Docker Engine API client
-bollard = { version = "0.20", default-features = false, features = ["ssl", "pipe"] }
-bytes = "1"
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+bollard = { version = "0.20", default-features = false, features = ["ssl", "pipe"], optional = true }
+bytes = { version = "1", optional = true }
+futures-util = { version = "0.3", default-features = false, features = ["std"], optional = true }
 
 # Tar archive creation (for bollard upload_to_container)
-tar = "0.4"
+tar = { version = "0.4", default-features = false, optional = true }
 
 [profile.release]
 # Aggressive size optimization
-opt-level = "z"        # Optimize for size
+opt-level = "s"        # Optimize for size with better runtime performance than "z"
 lto = "fat"            # Fat Link Time Optimization for maximum size reduction
 codegen-units = 1      # Reduce parallel code generation units
 panic = "abort"        # Abort on panic instead of unwinding
@@ -91,3 +99,13 @@ incremental = false    # Disable incremental compilation
 # Keep development builds fast
 opt-level = 0
 debug = true
+split-debuginfo = "unpacked"  # Skip dsymutil on macOS, saves 1-5s per incremental build
+
+# Optimize heavy C/crypto deps in dev — these run slowly at opt-level 0
+# and never need debugging. No impact on incremental build times.
+[profile.dev.package.libsqlite3-sys]
+opt-level = 1
+[profile.dev.package.ring]
+opt-level = 2
+[profile.dev.package.aws-lc-sys]
+opt-level = 2

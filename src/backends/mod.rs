@@ -1,8 +1,13 @@
+#[cfg(feature = "backend-dblab")]
 pub mod dblab;
 pub mod factory;
+#[cfg(feature = "backend-local")]
 pub mod local;
+#[cfg(feature = "backend-neon")]
 pub mod neon;
+#[cfg(feature = "backend-postgres-template")]
 pub mod postgres_template;
+#[cfg(feature = "backend-xata")]
 pub mod xata;
 
 use anyhow::Result;

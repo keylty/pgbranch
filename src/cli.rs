@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::backends;
 use crate::config::{Config, EffectiveConfig};
+#[cfg(feature = "backend-postgres-template")]
 use crate::database::DatabaseManager;
 use crate::docker;
 use crate::git::GitRepository;
@@ -223,6 +224,7 @@ pub async fn handle_command(
         None
     };
 
+    #[cfg(feature = "backend-postgres-template")]
     let db_manager = DatabaseManager::new(config.clone());
 
     match cmd {
@@ -292,6 +294,7 @@ pub async fn handle_command(
                     }
 
                     // On Linux, offer ZFS auto-setup before creating the main branch
+                    #[cfg(feature = "backend-local")]
                     if cfg!(target_os = "linux") {
                         if let Some(data_root) = attempt_zfs_auto_setup(_non_interactive).await {
                             let mut updated_cfg = named_cfg.clone();
@@ -317,6 +320,11 @@ pub async fn handle_command(
                             .await;
                         }
                     } else {
+                        init_local_backend_main(&config_with_backend, &named_cfg, from.as_deref())
+                            .await;
+                    }
+                    #[cfg(not(feature = "backend-local"))]
+                    {
                         init_local_backend_main(&config_with_backend, &named_cfg, from.as_deref())
                             .await;
                     }
@@ -410,6 +418,7 @@ pub async fn handle_command(
                 // Create main branch for local backends
                 if is_local {
                     // On Linux, offer ZFS auto-setup before creating the main branch
+                    #[cfg(feature = "backend-local")]
                     if cfg!(target_os = "linux") {
                         if let Some(data_root) = attempt_zfs_auto_setup(_non_interactive).await {
                             // Update the named backend config with the ZFS data_root
@@ -429,6 +438,10 @@ pub async fn handle_command(
                     } else {
                         init_local_backend_main(&config, &named_cfg, from.as_deref()).await;
                     }
+                    #[cfg(not(feature = "backend-local"))]
+                    {
+                        init_local_backend_main(&config, &named_cfg, from.as_deref()).await;
+                    }
                 }
 
                 // Suggest adding local config to gitignore
@@ -444,34 +457,43 @@ pub async fn handle_command(
                 anyhow::bail!("setup-zfs is only supported on Linux");
             }
 
-            use crate::backends::local::storage::zfs_setup::*;
+            #[cfg(not(feature = "backend-local"))]
+            {
+                let _ = (pool_name, size);
+                anyhow::bail!("Local backend not compiled. Rebuild with --features backend-local");
+            }
 
-            let pool = pool_name.unwrap_or_else(|| "pgbranch".to_string());
-            let img_size = size.unwrap_or_else(|| "10G".to_string());
+            #[cfg(feature = "backend-local")]
+            {
+                use crate::backends::local::storage::zfs_setup::*;
 
-            let config = ZfsPoolSetupConfig {
-                pool_name: pool.clone(),
-                image_path: PathBuf::from(format!("/var/lib/pgbranch/{}.img", pool)),
-                image_size: img_size.clone(),
-                mountpoint: PathBuf::from("/var/lib/pgbranch/data"),
-            };
+                let pool = pool_name.unwrap_or_else(|| "pgbranch".to_string());
+                let img_size = size.unwrap_or_else(|| "10G".to_string());
 
-            println!("Creating file-backed ZFS pool:");
-            println!("  Pool name:  {}", config.pool_name);
-            println!(
-                "  Image:      {} (sparse, {})",
-                config.image_path.display(),
-                img_size
-            );
-            println!("  Mountpoint: {}", config.mountpoint.display());
-            println!();
+                let config = ZfsPoolSetupConfig {
+                    pool_name: pool.clone(),
+                    image_path: PathBuf::from(format!("/var/lib/pgbranch/{}.img", pool)),
+                    image_size: img_size.clone(),
+                    mountpoint: PathBuf::from("/var/lib/pgbranch/data"),
+                };
 
-            let data_root = create_file_backed_pool(&config).await?;
-            println!();
-            println!("ZFS pool '{}' created successfully", pool);
-            println!("Data root: {}", data_root);
-            println!();
-            println!("Run 'pgbranch init' to set up a project using this pool.");
+                println!("Creating file-backed ZFS pool:");
+                println!("  Pool name:  {}", config.pool_name);
+                println!(
+                    "  Image:      {} (sparse, {})",
+                    config.image_path.display(),
+                    img_size
+                );
+                println!("  Mountpoint: {}", config.mountpoint.display());
+                println!();
+
+                let data_root = create_file_backed_pool(&config).await?;
+                println!();
+                println!("ZFS pool '{}' created successfully", pool);
+                println!("Data root: {}", data_root);
+                println!();
+                println!("Run 'pgbranch init' to set up a project using this pool.");
+            }
         }
         Commands::Config { verbose } => {
             if verbose {
@@ -499,18 +521,34 @@ pub async fn handle_command(
                 log::debug!("Git hooks are disabled via configuration");
                 return Ok(());
             }
-            handle_git_hook(
-                &mut config,
-                &db_manager,
-                &mut local_state,
-                &config_path,
-                worktree,
-                main_worktree_dir,
-            )
-            .await?;
+            #[cfg(feature = "backend-postgres-template")]
+            {
+                handle_git_hook(
+                    &mut config,
+                    &db_manager,
+                    &mut local_state,
+                    &config_path,
+                    worktree,
+                    main_worktree_dir,
+                )
+                .await?;
+            }
+            #[cfg(not(feature = "backend-postgres-template"))]
+            {
+                let _ = (worktree, main_worktree_dir);
+                anyhow::bail!("Legacy git hook support requires the postgres-template backend. Rebuild with --features backend-postgres-template");
+            }
         }
         Commands::WorktreeSetup => {
-            handle_worktree_setup(&mut config, &db_manager, &mut local_state, &config_path).await?;
+            #[cfg(feature = "backend-postgres-template")]
+            {
+                handle_worktree_setup(&mut config, &db_manager, &mut local_state, &config_path)
+                    .await?;
+            }
+            #[cfg(not(feature = "backend-postgres-template"))]
+            {
+                anyhow::bail!("Legacy worktree support requires the postgres-template backend. Rebuild with --features backend-postgres-template");
+            }
         }
         Commands::Switch {
             branch_name,
@@ -533,21 +571,41 @@ pub async fn handle_command(
                 } else {
                     println!("Dry run requires a branch name");
                 }
-            } else if template {
-                handle_switch_to_main(&mut config, &db_manager, &mut local_state, &config_path)
-                    .await?;
-            } else if let Some(branch) = branch_name {
-                handle_switch_command(
-                    &mut config,
-                    &db_manager,
-                    &branch,
-                    &mut local_state,
-                    &config_path,
-                )
-                .await?;
             } else {
-                handle_interactive_switch(&mut config, &db_manager, &mut local_state, &config_path)
-                    .await?;
+                #[cfg(feature = "backend-postgres-template")]
+                {
+                    if template {
+                        handle_switch_to_main(
+                            &mut config,
+                            &db_manager,
+                            &mut local_state,
+                            &config_path,
+                        )
+                        .await?;
+                    } else if let Some(branch) = branch_name {
+                        handle_switch_command(
+                            &mut config,
+                            &db_manager,
+                            &branch,
+                            &mut local_state,
+                            &config_path,
+                        )
+                        .await?;
+                    } else {
+                        handle_interactive_switch(
+                            &mut config,
+                            &db_manager,
+                            &mut local_state,
+                            &config_path,
+                        )
+                        .await?;
+                    }
+                }
+                #[cfg(not(feature = "backend-postgres-template"))]
+                {
+                    let _ = (template, branch_name);
+                    anyhow::bail!("Legacy switch support requires the postgres-template backend. Rebuild with --features backend-postgres-template");
+                }
             }
         }
         _ => unreachable!(),
@@ -559,6 +617,7 @@ pub async fn handle_command(
 /// Check if ZFS auto-setup should be offered during init (Linux only).
 /// Returns `Some(data_root)` if a pool was created or already exists,
 /// so the caller can set it on the `LocalBackendConfig`.
+#[cfg(feature = "backend-local")]
 async fn attempt_zfs_auto_setup(non_interactive: bool) -> Option<String> {
     use crate::backends::local::storage::zfs_setup::*;
 
@@ -1262,6 +1321,7 @@ fn copy_worktree_files(config: &Config, main_worktree_dir: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "backend-postgres-template")]
 async fn handle_worktree_setup(
     config: &mut Config,
     db_manager: &DatabaseManager,
@@ -1289,6 +1349,7 @@ async fn handle_worktree_setup(
     Ok(())
 }
 
+#[cfg(feature = "backend-postgres-template")]
 async fn handle_git_hook(
     config: &mut Config,
     db_manager: &DatabaseManager,
@@ -1343,6 +1404,7 @@ async fn handle_git_hook(
     Ok(())
 }
 
+#[cfg(feature = "backend-postgres-template")]
 async fn handle_interactive_switch(
     config: &mut Config,
     db_manager: &DatabaseManager,
@@ -1486,6 +1548,7 @@ fn run_interactive_selector(items: Vec<BranchItem>) -> Result<String, inquire::I
     Ok(items[selected_index].name.clone())
 }
 
+#[cfg(feature = "backend-postgres-template")]
 async fn handle_switch_command(
     config: &mut Config,
     db_manager: &DatabaseManager,
@@ -1535,6 +1598,7 @@ async fn handle_switch_command(
     Ok(())
 }
 
+#[cfg(feature = "backend-postgres-template")]
 async fn handle_switch_to_main(
     config: &mut Config,
     _db_manager: &DatabaseManager,

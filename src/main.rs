@@ -4,6 +4,7 @@ use clap::{CommandFactory, Parser};
 mod backends;
 mod cli;
 mod config;
+#[cfg(feature = "backend-postgres-template")]
 mod database;
 mod docker;
 mod git;
